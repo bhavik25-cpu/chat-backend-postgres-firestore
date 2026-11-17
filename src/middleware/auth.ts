@@ -10,11 +10,19 @@ export async function requireFirebaseAuth(req: Request, res: Response, next: Nex
     return;
   }
 
+  let uid: string;
   try {
     const decoded = await admin.auth().verifyIdToken(match[1]);
+    uid = decoded.uid;
+  } catch {
+    res.status(401).json({ success: false, message: 'Invalid or expired Firebase ID token.' });
+    return;
+  }
+
+  try {
     const result = await pool.query<{ id: string }>(
       'SELECT id FROM users WHERE firebase_uid = $1',
-      [decoded.uid]
+      [uid]
     );
     if (!result.rows[0]) {
       res.status(403).json({ success: false, message: 'This Firebase account is not linked to an application user.' });
@@ -22,7 +30,7 @@ export async function requireFirebaseAuth(req: Request, res: Response, next: Nex
     }
     req.authUserId = result.rows[0].id;
     next();
-  } catch {
-    res.status(401).json({ success: false, message: 'Invalid or expired Firebase ID token.' });
+  } catch (error) {
+    next(error);
   }
 }
