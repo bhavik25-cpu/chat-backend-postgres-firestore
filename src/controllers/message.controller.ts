@@ -12,7 +12,7 @@ const lastSeenSchema = z.object({ userId: uuid, messageId: z.string().min(1) });
 export const send = asyncHandler(async (req: Request, res: Response) => {
   const chatId = uuid.parse(req.params.chatId);
   const body = sendSchema.parse(req.body);
-  if (body.senderId !== req.authUserId) throw new HttpError(403, 'senderId must match the authenticated user.');
+  if (body.senderId.toLowerCase() !== req.authUserId?.toLowerCase()) throw new HttpError(403, 'senderId must match the authenticated user.');
   const message = await sendMessage(chatId, body.senderId, body.text);
   res.status(201).json({ success: true, data: message });
 });
@@ -30,7 +30,7 @@ export const markRead = asyncHandler(async (req: Request, res: Response) => {
   const chatId = uuid.parse(req.params.chatId);
   const messageId = z.string().min(1).parse(req.params.messageId);
   const { userId } = readSchema.parse(req.body);
-  if (userId !== req.authUserId) throw new HttpError(403, 'userId must match the authenticated user.');
+  if (userId.toLowerCase() !== req.authUserId?.toLowerCase()) throw new HttpError(403, 'userId must match the authenticated user.');
   await markMessageRead(chatId, messageId, userId);
   res.status(200).json({ success: true, message: 'Message marked as read.' });
 });
@@ -38,7 +38,7 @@ export const markRead = asyncHandler(async (req: Request, res: Response) => {
 export const lastSeen = asyncHandler(async (req: Request, res: Response) => {
   const chatId = uuid.parse(req.params.chatId);
   const body = lastSeenSchema.parse(req.body);
-  if (body.userId !== req.authUserId) throw new HttpError(403, 'userId must match the authenticated user.');
+  if (body.userId.toLowerCase() !== req.authUserId?.toLowerCase()) throw new HttpError(403, 'userId must match the authenticated user.');
   await updateLastSeen(chatId, body.userId, body.messageId);
   res.status(200).json({ success: true, data: await getLastSeen(chatId, body.userId) });
 });
