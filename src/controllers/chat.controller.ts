@@ -10,7 +10,7 @@ const userIdSchema = z.string().uuid();
 export const createChat = asyncHandler(async (req: Request, res: Response) => {
   const body = createChatSchema.parse(req.body);
   const authenticatedUserId = req.authUserId!;
-  if (body.userAId !== authenticatedUserId && body.userBId !== authenticatedUserId) {
+  if (body.userAId.toLowerCase() !== authenticatedUserId.toLowerCase() && body.userBId.toLowerCase() !== authenticatedUserId.toLowerCase()) {
     throw new HttpError(403, 'You can only create a chat that includes your account.');
   }
   const result = await createOrGetDirectChat(body.userAId, body.userBId);
@@ -19,7 +19,7 @@ export const createChat = asyncHandler(async (req: Request, res: Response) => {
 
 export const getUserChats = asyncHandler(async (req: Request, res: Response) => {
   const userId = userIdSchema.parse(req.params.userId);
-  if (userId !== req.authUserId) throw new HttpError(403, 'You can only view your own chats.');
+  if (userId.toLowerCase() !== req.authUserId?.toLowerCase()) throw new HttpError(403, 'You can only view your own chats.');
   const chats = await listUserChats(userId);
   res.status(200).json({ success: true, data: chats });
 });
