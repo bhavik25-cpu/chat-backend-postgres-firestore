@@ -10,13 +10,15 @@ export interface ChatSummary {
 }
 
 export async function createOrGetDirectChat(userAId: string, userBId: string): Promise<{ chatId: string }> {
-  if (userAId === userBId) throw new HttpError(400, 'A direct chat requires two different users.');
+  const normalizedA = userAId.toLowerCase();
+  const normalizedB = userBId.toLowerCase();
+  if (normalizedA === normalizedB) throw new HttpError(400, 'A direct chat requires two different users.');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const users = await client.query('SELECT id FROM users WHERE id = ANY($1::uuid[]) FOR SHARE', [[userAId, userBId]]);
+    const users = await client.query('SELECT id FROM users WHERE id = ANY($1::uuid[]) FOR SHARE', [[normalizedA, normalizedB]]);
     if (users.rowCount !== 2) throw new HttpError(404, 'One or both users were not found.');
-    const [low, high] = [userAId, userBId].sort();
+    const [low, high] = [normalizedA, normalizedB].sort();
     const existing = await client.query<{ chat_id: string }>(
       'SELECT chat_id FROM direct_chat_pairs WHERE user_low = $1 AND user_high = $2', [low, high]
     );
@@ -25,11 +27,11 @@ export async function createOrGetDirectChat(userAId: string, userBId: string): P
       return { chatId: existing.rows[0].chat_id };
     }
     const chat = await client.query<{ id: string }>(
-      'INSERT INTO chats (created_by) VALUES ($1) RETURNING id', [userAId]
+      'INSERT INTO chats (created_by) VALUES ($1) RETURNING id', [normalizedA]
     );
     const chatId = chat.rows[0].id;
     await client.query(
-      'INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)', [chatId, userAId, userBId]
+      'INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2), ($1, $3)', [chatId, normalizedA, normalizedB]
     );
     await client.query(
       'INSERT INTO direct_chat_pairs (user_low, user_high, chat_id) VALUES ($1, $2, $3)', [low, high, chatId]
@@ -38,9 +40,8 @@ export async function createOrGetDirectChat(userAId: string, userBId: string): P
     return { chatId };
   } catch (error) {
     await client.query('ROLLBACK');
-    // A concurrent request may have won the unique pair insert.
     if (error instanceof Error && 'code' in error && error.code === '23505') {
-      const [low, high] = [userAId, userBId].sort();
+      const [low, high] = [normalizedA, normalizedB].sort();
       const found = await pool.query<{ chat_id: string }>(
         'SELECT chat_id FROM direct_chat_pairs WHERE user_low = $1 AND user_high = $2', [low, high]
       );
