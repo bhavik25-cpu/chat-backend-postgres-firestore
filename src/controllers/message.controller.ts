@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { getMessages, markMessageRead, sendMessage, updateLastSeen, getLastSeen } from '../services/message.service';
 import { asyncHandler } from '../utils/async-handler';
+import { HttpError } from '../utils/http-error';
 
 const uuid = z.string().uuid();
 const sendSchema = z.object({ senderId: uuid, text: z.string().trim().min(1).max(5000) });
@@ -11,13 +12,14 @@ const lastSeenSchema = z.object({ userId: uuid, messageId: z.string().min(1) });
 export const send = asyncHandler(async (req: Request, res: Response) => {
   const chatId = uuid.parse(req.params.chatId);
   const body = sendSchema.parse(req.body);
+  if (body.senderId !== req.authUserId) throw new HttpError(403, 'senderId must match the authenticated user.');
   const message = await sendMessage(chatId, body.senderId, body.text);
   res.status(201).json({ success: true, data: message });
 });
 
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const chatId = uuid.parse(req.params.chatId);
-  const userId = uuid.parse(req.query.userId);
+  const userId = req.authUserId!;
   const limit = z.coerce.number().int().min(1).max(100).default(50).parse(req.query.limit);
   const before = req.query.before === undefined ? undefined : z.string().min(1).parse(req.query.before);
   const messages = await getMessages(chatId, userId, limit, before);
@@ -28,6 +30,7 @@ export const markRead = asyncHandler(async (req: Request, res: Response) => {
   const chatId = uuid.parse(req.params.chatId);
   const messageId = z.string().min(1).parse(req.params.messageId);
   const { userId } = readSchema.parse(req.body);
+  if (userId !== req.authUserId) throw new HttpError(403, 'userId must match the authenticated user.');
   await markMessageRead(chatId, messageId, userId);
   res.status(200).json({ success: true, message: 'Message marked as read.' });
 });
@@ -35,6 +38,7 @@ export const markRead = asyncHandler(async (req: Request, res: Response) => {
 export const lastSeen = asyncHandler(async (req: Request, res: Response) => {
   const chatId = uuid.parse(req.params.chatId);
   const body = lastSeenSchema.parse(req.body);
+  if (body.userId !== req.authUserId) throw new HttpError(403, 'userId must match the authenticated user.');
   await updateLastSeen(chatId, body.userId, body.messageId);
   res.status(200).json({ success: true, data: await getLastSeen(chatId, body.userId) });
 });
