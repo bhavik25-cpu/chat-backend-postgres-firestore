@@ -2,6 +2,7 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { firestore } from '../config/firebase';
 import { assertChatMember, touchChat } from './chat.service';
 import { HttpError } from '../utils/http-error';
+import { shouldAdvanceLastSeen } from '../utils/last-seen-order';
 
 export interface ChatMessage {
   id: string;
@@ -21,7 +22,13 @@ export async function sendMessage(chatId: string, senderId: string, text: string
     chatId, senderId, text, createdAt: now,
     readBy: [senderId], updatedAt: now
   });
-  await touchChat(chatId);
+  try {
+    await touchChat(chatId);
+  } catch (error) {
+    // The message is already durable in Firestore. Do not report a failed send
+    // that could cause a client retry to create a duplicate message.
+    console.error('Message saved but chat timestamp update failed:', error);
+  }
   return { id: doc.id, chatId, senderId, text, createdAt: now.toDate().toISOString(), readBy: [senderId] };
 }
 
@@ -59,12 +66,20 @@ export async function updateLastSeen(chatId: string, userId: string, messageId: 
   const message = await messagesRef(chatId).doc(messageId).get();
   if (!message.exists) throw new HttpError(404, 'Message not found.');
   const messageData = message.data();
+  const nextTime = messageData?.createdAt as Timestamp;
+  if (!(nextTime instanceof Timestamp)) throw new HttpError(500, 'Message timestamp is invalid.');
   const seenRef = firestore.collection('chats').doc(chatId).collection('lastSeen').doc(userId);
   await firestore.runTransaction(async transaction => {
     const current = await transaction.get(seenRef);
-    const currentTime = current.exists ? (current.data()?.messageCreatedAt as Timestamp | undefined) : undefined;
-    const nextTime = messageData?.createdAt as Timestamp;
-    if (currentTime && currentTime.toMillis() > nextTime.toMillis()) return;
+    const currentData = current.data();
+    const currentTime = currentData?.messageCreatedAt as Timestamp | undefined;
+    const shouldAdvance = shouldAdvanceLastSeen(
+      currentTime?.toMillis(),
+      typeof currentData?.messageId === 'string' ? currentData.messageId : undefined,
+      nextTime.toMillis(),
+      messageId
+    );
+    if (!shouldAdvance) return;
     transaction.set(seenRef, {
       userId, messageId, messageCreatedAt: nextTime,
       updatedAt: Timestamp.now()
